@@ -198,6 +198,22 @@ async function loadLegacy(){
 }
 async function loadAll(){const g=p=>sb(p).then(r=>r.json());const [P,Al,R,St]=await Promise.all([g('/rest/v1/posts?select=*&order=date.desc,id.desc'),g('/rest/v1/albums?select=*&order=position.asc'),g('/rest/v1/reports?select=*&order=date.desc'),g('/rest/v1/settings?select=*')]);
 S=assemble(P,Al,R,St);legacyMode=false;captureBase(S,P,Al,R,St);last=snapshot();loadErr=false;stat={s:'ok',m:'',c:false}}
+// Recovery-safe loader: prefer existing legacy content over an empty new schema.
+async function loadPreferred(){
+  try {
+    await loadLegacy();
+    return;
+  } catch (legacyErr) {
+    console.warn('Legacy data unavailable; checking current tables:', legacyErr);
+  }
+  await loadAll();
+  // Never silently display a blank schema as successful content recovery.
+  if(!S.posts.length && !S.albums.length && !S.reports.length){
+    legacyMode=true;loadErr=true;
+    stat={s:'bad',m:'لم يُعثر على المحتوى القديم أو الجديد؛ الحفظ معطل حمايةً للبيانات',c:false};
+    console.error('لا توجد بيانات منشورات/ألبومات؛ تحقق من صلاحيات قراءة site_data');
+  }
+}
 async function reloadAll(){if(!confirm('ستُتجاهل تعديلاتك غير المحفوظة ويُعاد تحميل أحدث بيانات الخادم. متابعة؟'))return;try{if(legacyMode)await loadLegacy();else await loadAll();toast('تم تحميل أحدث البيانات');route()}catch(e){toast('تعذّر التحميل')}}
 /* ---------- الحفظ: مزامنة لكل عنصر مع فحص الإصدار ---------- */
 const JH={'Content-Type':'application/json'};
@@ -234,15 +250,15 @@ if(!r.ok){const e=new Error(j.error_code||j.msg||j.error||'auth_failed');e.statu
 setTok(j);
 try{me=await loadMe()}catch(e){const err=new Error(e.status===404?'missing_profiles':'profile_access_error');err.status=e.status;throw err}
 if(!me||!me.active){throw new Error('missing_profile')}
-auth=true;fails=0;await loadAll().catch(()=>{});route();return}
+auth=true;fails=0;await loadPreferred().catch(e=>{loadErr=true;legacyMode=true;console.error('تعذّر استعادة المحتوى',e)});route();return}
 catch(e){dropSession();fails++;m.textContent=e.message==='missing_profile'||e.message==='missing_profiles'?'تم التحقق من الحساب، لكن ملف صلاحيات الإدارة profiles غير مُعدّ بعد. لا تغيّر كلمة المرور.':e.message==='profile_access_error'?'نجح التحقق من كلمة المرور لكن تعذّر قراءة صلاحيات الحساب. افحص جدول profiles وسياسات RLS.':(e.status===400||e.status===401||e.message==='invalid_credentials')?'البريد الإلكتروني أو كلمة المرور غير صحيحة':e.status===429?'محاولات كثيرة، انتظر قليلًا ثم حاول مجددًا':'تعذّر تسجيل الدخول: '+String(e.message).slice(0,120)}
 if(fails>=5){m.textContent='محاولات كثيرة غير ناجحة. انتظر 30 ثانية ثم حاول مجددًا.';setTimeout(()=>{const x=$('lg_b');if(x){x.disabled=false;fails=0}},30000);b.classList.remove('ld');return}
 b.disabled=false;b.classList.remove('ld')}
 function eye(){const i=$('lg_p');i.type=i.type==='password'?'text':'password';$('lg_eye').setAttribute('aria-label',i.type==='password'?'إظهار كلمة المرور':'إخفاء كلمة المرور')}
-async function logout(){try{await sb('/auth/v1/logout?scope=local',{m:'POST'})}catch(e){}dropSession();try{await loadAll()}catch(e){}go('#/')}
+async function logout(){try{await sb('/auth/v1/logout?scope=local',{m:'POST'})}catch(e){}dropSession();try{await loadPreferred()}catch(e){}go('#/')}
 async function boot(){$('app').innerHTML='<p style="padding:40px;text-align:center">جارٍ التحميل…</p>';try{tok=JSON.parse(localStorage.getItem('ns-sess'))}catch(e){tok=null}
 if(tok&&tok.at&&tok.rt){try{await ensure();me=await loadMe();if(me&&me.active)auth=true;else dropSession()}catch(e){dropSession()}}else tok=null;
-try{await loadAll()}catch(e){try{await loadLegacy()}catch(le){loadErr=true;S=seed();last=snapshot();console.error('فشل تحميل الموقع',e,le)}}
+try{await loadPreferred()}catch(e){loadErr=true;legacyMode=true;console.error('تعذّر تحميل بيانات الموقع القديمة',e)}
 splLogos();route();if(legacyMode){const banner=document.createElement('div');banner.textContent='وضع الاستعادة: البيانات القديمة معروضة من Supabase، والحفظ من لوحة التحكم متوقف مؤقتًا لحماية بياناتك.';banner.setAttribute('role','status');banner.style.cssText='position:fixed;bottom:0;right:0;left:0;z-index:200;background:#fff3ce;color:#493500;padding:8px 14px;text-align:center;font:14px Tahoma,Arial,sans-serif;border-top:2px solid #cc9b10';document.body.appendChild(banner)}}
 
 let toastT;function toast(m){const t=document.getElementById('tt');t.innerHTML=`<div class="toast" role="status">${esc(m)}</div>`;clearTimeout(toastT);toastT=setTimeout(()=>t.innerHTML='',3500)}
