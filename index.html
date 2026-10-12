@@ -228,8 +228,14 @@ await sb('/storage/v1/object/media/'+path,{m:'POST',b,h:{'Content-Type':t}});ret
 let fails=0,lockUntil=0;
 async function login_(){const m=$('lg_m'),b=$('lg_b');if(!m||b.disabled)return;const u=$('lg_u').value.trim(),p=$('lg_p').value;if(!u||!p){m.textContent='أدخل اسم المستخدم وكلمة المرور';return}
 b.disabled=true;b.classList.add('ld');m.textContent='';
-try{const j=await fn('auth-login',{username:u,password:p},false);setTok(j);me=await loadMe();if(!me||!me.active)throw Object.assign(new Error('x'),{status:401});auth=true;fails=0;await loadAll().catch(()=>{});route();return}
-catch(e){dropSession();fails++;m.textContent=(e.status===401||e.status===400||e.status===403||e.message==='x')?'اسم المستخدم أو كلمة المرور غير صحيحة':'تعذّر الاتصال بالخادم، حاول مرة أخرى بعد قليل'}
+try{const r=await fetch(SB.url+'/auth/v1/token?grant_type=password',{method:'POST',headers:{apikey:SB.key,'Content-Type':'application/json'},body:JSON.stringify({email:u,password:p})});
+const j=await r.json().catch(()=>({}));
+if(!r.ok){const e=new Error(j.error_code||j.msg||j.error||'auth_failed');e.status=r.status;throw e}
+setTok(j);
+try{me=await loadMe()}catch(e){const err=new Error(e.status===404?'missing_profiles':'profile_access_error');err.status=e.status;throw err}
+if(!me||!me.active){throw new Error('missing_profile')}
+auth=true;fails=0;await loadAll().catch(()=>{});route();return}
+catch(e){dropSession();fails++;m.textContent=e.message==='missing_profile'||e.message==='missing_profiles'?'تم التحقق من الحساب، لكن ملف صلاحيات الإدارة profiles غير مُعدّ بعد. لا تغيّر كلمة المرور.':e.message==='profile_access_error'?'نجح التحقق من كلمة المرور لكن تعذّر قراءة صلاحيات الحساب. افحص جدول profiles وسياسات RLS.':(e.status===400||e.status===401||e.message==='invalid_credentials')?'البريد الإلكتروني أو كلمة المرور غير صحيحة':e.status===429?'محاولات كثيرة، انتظر قليلًا ثم حاول مجددًا':'تعذّر تسجيل الدخول: '+String(e.message).slice(0,120)}
 if(fails>=5){m.textContent='محاولات كثيرة غير ناجحة. انتظر 30 ثانية ثم حاول مجددًا.';setTimeout(()=>{const x=$('lg_b');if(x){x.disabled=false;fails=0}},30000);b.classList.remove('ld');return}
 b.disabled=false;b.classList.remove('ld')}
 function eye(){const i=$('lg_p');i.type=i.type==='password'?'text':'password';$('lg_eye').setAttribute('aria-label',i.type==='password'?'إظهار كلمة المرور':'إخفاء كلمة المرور')}
@@ -298,7 +304,7 @@ addEventListener('keydown',e=>{if(!document.getElementById('lb').classList.conta
 /* ---------- admin ---------- */
 const readF=async(inp,cb)=>{const fs=[...inp.files];toast('جارٍ الرفع…');for(const f of fs){try{cb(await up(f))}catch(e){toast('تعذّر الرفع: '+e.message.slice(0,80))}}};
 function login(){return`<div class="lw"><div class="lc"><img class="logo lg0" src="${esc(LOGO_A)}" alt="شعار النشاط الطلابي"><h2>دخول الإدارة</h2><p class="mut" style="text-align:center;margin:0 0 10px">النشاط الطلابي — مدرسة الشيخ محمد بن عثيمين</p>
-<label for="lg_u">اسم المستخدم</label><input type="text" id="lg_u" dir="ltr" autocomplete="username" autocapitalize="none" spellcheck="false" onkeydown="if(event.key==='Enter')$('lg_p').focus()">
+<label for="lg_u">البريد الإلكتروني</label><input type="text" id="lg_u" type="email" dir="ltr" autocomplete="username" autocapitalize="none" spellcheck="false" onkeydown="if(event.key==='Enter')$('lg_p').focus()">
 <label for="lg_p">كلمة المرور</label><div class="pw"><input type="password" id="lg_p" dir="ltr" autocomplete="current-password" onkeydown="if(event.key==='Enter')login_()"><button type="button" class="eye" id="lg_eye" onclick="eye()" aria-label="إظهار كلمة المرور">👁</button></div>
 <p id="lg_m" class="err" role="alert" aria-live="polite"></p><button class="btn big" id="lg_b" onclick="login_()"><span class="spin"></span><span>دخول</span></button><p style="text-align:center;margin:14px 0 0"><a href="#/" style="color:var(--teal)">العودة للموقع</a></p></div></div>`}
 const PWE={wrong_current_password:'كلمة المرور الحالية غير صحيحة',same_password:'اختر كلمة مرور مختلفة عن الحالية',weak_password_length:'كلمة المرور قصيرة (12 حرفًا على الأقل)',weak_password_charset:'يجب أن تحوي حروفًا وأرقامًا',weak_password_contains_username:'لا تضع اسم المستخدم داخل كلمة المرور',weak_password_repeat:'كلمة المرور ضعيفة',password_too_long:'كلمة المرور طويلة جدًا'};
