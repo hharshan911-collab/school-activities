@@ -323,14 +323,28 @@ function login(){return`<div class="lw"><div class="lc"><img class="logo lg0" sr
 <label for="lg_u">البريد الإلكتروني</label><input type="text" id="lg_u" type="email" dir="ltr" autocomplete="username" autocapitalize="none" spellcheck="false" onkeydown="if(event.key==='Enter')$('lg_p').focus()">
 <label for="lg_p">كلمة المرور</label><div class="pw"><input type="password" id="lg_p" dir="ltr" autocomplete="current-password" onkeydown="if(event.key==='Enter')login_()"><button type="button" class="eye" id="lg_eye" onclick="eye()" aria-label="إظهار كلمة المرور">👁</button></div>
 <p id="lg_m" class="err" role="alert" aria-live="polite"></p><button class="btn big" id="lg_b" onclick="login_()"><span class="spin"></span><span>دخول</span></button><p style="text-align:center;margin:14px 0 0"><a href="#/" style="color:var(--teal)">العودة للموقع</a></p></div></div>`}
-const PWE={wrong_current_password:'كلمة المرور الحالية غير صحيحة',same_password:'اختر كلمة مرور مختلفة عن الحالية',weak_password_length:'كلمة المرور قصيرة (12 حرفًا على الأقل)',weak_password_charset:'يجب أن تحوي حروفًا وأرقامًا',weak_password_contains_username:'لا تضع اسم المستخدم داخل كلمة المرور',weak_password_repeat:'كلمة المرور ضعيفة',password_too_long:'كلمة المرور طويلة جدًا'};
+const PWE={wrong_current_password:'كلمة المرور الحالية غير صحيحة',same_password:'اختر كلمة مرور مختلفة عن الحالية',weak_password_length:'كلمة المرور قصيرة (6 أحرف على الأقل)',weak_password_charset:'يجب أن تحوي حروفًا وأرقامًا',weak_password_contains_username:'لا تضع اسم المستخدم داخل كلمة المرور',weak_password_repeat:'كلمة المرور ضعيفة',password_too_long:'كلمة المرور طويلة جدًا'};
 function pwScreen(forced){return`<div class="${forced?'lw':''}"><div class="lc" ${forced?'':'style="margin:0"'}><h2>${forced?'يجب تغيير كلمة المرور المؤقتة':'تغيير كلمة المرور'}</h2>${forced?'<p class="mut">لأمان حسابك اختر كلمة مرور جديدة قبل المتابعة.</p>':''}
 <label for="pw0">كلمة المرور الحالية</label><input type="password" id="pw0" dir="ltr" autocomplete="current-password">
-<label for="pw1">كلمة المرور الجديدة (12 حرفًا على الأقل، حروف وأرقام)</label><input type="password" id="pw1" dir="ltr" autocomplete="new-password">
+<label for="pw1">كلمة المرور الجديدة (6 أحرف على الأقل، ويُفضّل 12 أو أكثر)</label><input type="password" id="pw1" dir="ltr" autocomplete="new-password">
 <label for="pw2">تأكيد كلمة المرور الجديدة</label><input type="password" id="pw2" dir="ltr" autocomplete="new-password">
 <p id="pw_m" class="err" role="alert"></p><div class="acts"><button class="btn" id="pw_b" onclick="chgPw()">حفظ كلمة المرور</button>${forced?'<button class="btn o" onclick="logout()">تسجيل الخروج</button>':''}</div></div></div>`}
-async function chgPw(){const m=$('pw_m'),b=$('pw_b'),c=$('pw0').value,n=$('pw1').value;if(n.length<12){m.textContent=PWE.weak_password_length;return}if(n!==$('pw2').value){m.textContent='تأكيد كلمة المرور غير مطابق';return}
-b.disabled=true;m.textContent='';try{await fn('change-password',{current:c,next:n});me.must_change_password=false;toast('تم تغيير كلمة المرور');route()}catch(e){m.textContent=PWE[e.code]||'تعذّر تغيير كلمة المرور'}b.disabled=false}
+async function chgPw(){const m=$('pw_m'),b=$('pw_b'),c=$('pw0').value,n=$('pw1').value;if(n.length<6){m.textContent=PWE.weak_password_length;return}if(n!==$('pw2').value){m.textContent='تأكيد كلمة المرور غير مطابق';return}
+b.disabled=true;m.textContent='';try{
+  await ensure();
+  if(!me?.email)throw new Error('تعذّر تحديد البريد الإلكتروني للحساب');
+  if(!c)throw new Error('أدخل كلمة المرور الحالية');
+  if(c===n)throw new Error(PWE.same_password);
+  const vr=await fetch(SB.url+'/auth/v1/token?grant_type=password',{method:'POST',headers:{apikey:SB.key,'Content-Type':'application/json'},body:JSON.stringify({email:me.email,password:c})});
+  if(!vr.ok)throw new Error('كلمة المرور الحالية غير صحيحة');
+  const verified=await vr.json();
+  const change=await fetch(SB.url+'/auth/v1/user',{method:'PUT',headers:{apikey:SB.key,Authorization:'Bearer '+verified.access_token,'Content-Type':'application/json'},body:JSON.stringify({password:n})});
+  if(!change.ok){const details=await change.json().catch(()=>({}));throw new Error(details.msg||details.message||details.error_description||'تعذّر تغيير كلمة المرور: '+change.status)}
+  setTok(verified);
+  const clear=await fetch(SB.url+'/rest/v1/profiles?id=eq.'+encodeURIComponent(me.id),{method:'PATCH',headers:{apikey:SB.key,Authorization:'Bearer '+tok.at,'Content-Type':'application/json',Prefer:'return=minimal'},body:JSON.stringify({must_change_password:false})});
+  if(!clear.ok)throw new Error('تم تغيير كلمة المرور، لكن تعذّر إزالة طلب التغيير الإجباري؛ تحقق من صلاحيات جدول profiles');
+  me.must_change_password=false;toast('تم تغيير كلمة المرور');route();
+}catch(e){m.textContent=e.message||'تعذّر تغيير كلمة المرور'}b.disabled=false}
 /* ---------- إدارة الحسابات (للمالك) ---------- */
 const RL={owner:'مالك',admin:'مدير',editor:'محرر',viewer:'مشاهد'},PL={content_create:'إضافة المحتوى',content_edit:'تعديل المحتوى',content_delete:'حذف المحتوى',content_publish:'نشر المحتوى',files_manage:'إدارة الملفات'},RP={owner:[1,1,1,1,1],admin:[1,1,1,1,1],editor:[1,1,0,0,1],viewer:[0,0,0,0,0]};
 const ACE={bad_username:'اسم المستخدم غير صالح (حروف إنجليزية وأرقام و . _ - من 3 إلى 32)',bad_email:'البريد الإلكتروني غير صالح',bad_role:'دور غير صالح',username_taken:'اسم المستخدم مستخدم بالفعل',create_failed:'تعذّر إنشاء الحساب (قد يكون البريد مستخدمًا)',cannot_remove_last_owner:'لا يمكن حذف أو تعطيل أو تخفيض آخر مالك',forbidden:'غير مصرح',not_found:'الحساب غير موجود',...PWE};
