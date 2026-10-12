@@ -151,7 +151,7 @@ const $=id=>document.getElementById(id);
 const newId=()=>Date.now()*1000+Math.floor(Math.random()*1000),uid=()=>Date.now().toString(36)+Math.random().toString(36).slice(2,5);
 const sk=k=>String(k??'').replace(/[^A-Za-z0-9_]/g,''),sg=o=>JSON.stringify(o);
 const UUID_OK=/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
-let me=null,loadErr=false,base={posts:new Map(),albums:new Map(),reports:new Map(),settings:new Map()},last='',busy=false,stat={s:'ok',m:'',c:false};
+let legacyMode=false;let me=null,loadErr=false,base={posts:new Map(),albums:new Map(),reports:new Map(),settings:new Map()},last='',busy=false,stat={s:'ok',m:'',c:false};
 const can=p=>!!(me&&me.active&&(me.role==='owner'||(me.perms&&me.perms[p]===true)));
 /* ---------- الشبكة والجلسة ---------- */
 async function sb(path,o={}){if(tok)await ensure();const r=await fetch(SB.url+path,{method:o.m||'GET',headers:{apikey:SB.key,Authorization:'Bearer '+(tok?tok.at:SB.key),...(o.h||{})},body:o.b});
@@ -183,13 +183,26 @@ const snapshot=()=>sg(rowsOf(S));
 function captureBase(X,P,Al,R,St){const rr=rowsOf(X),vm=(a,k)=>new Map(a.map(r=>[String(r[k]),r.version]));const vp=vm(P,'id'),va=vm(Al,'id'),vr=vm(R,'id'),vs=vm(St,'key');
 const mk=(rows,vmap)=>new Map(rows.map(r=>[r.id,{v:vmap.get(String(r.id)),s:sg(r)}]));
 base={posts:mk(rr.posts,vp),albums:mk(rr.albums,va),reports:mk(rr.reports,vr),settings:new Map(Object.keys(rr.settings).map(k=>[k,{v:vs.has(k)?vs.get(k):null,s:sg(rr.settings[k])}]))}}
+async function loadLegacy(){
+ const r=await sb('/rest/v1/site_data?id=eq.public&select=data');
+ const rows=await r.json();
+ if(!Array.isArray(rows)||!rows.length||!rows[0].data)throw new Error('لم يتم العثور على بيانات public القديمة');
+ const d=rows[0].data;
+ S=clean({
+  site:d.site||SITE(),org:{...seed().org,...(d.org||{})},home:d.home&&Array.isArray(d.home.blocks)?d.home:HOME(),
+  posts:(Array.isArray(d.posts)?d.posts:[]).map(p=>({...p,id:Number(p.id),imgs:Array.isArray(p.imgs)?p.imgs:[],status:p.status||'pub',cover:p.cover||p.imgs?.[0]||''})),
+  albums:(Array.isArray(d.albums)?d.albums:[]).map(a=>({...a,imgs:Array.isArray(a.imgs)?a.imgs:[]})),
+  reports:Array.isArray(d.reports)?d.reports:[]
+ });
+ legacyMode=true;loadErr=false;last=snapshot();stat={s:'ok',m:'وضع استعادة للعرض فقط',c:false};
+}
 async function loadAll(){const g=p=>sb(p).then(r=>r.json());const [P,Al,R,St]=await Promise.all([g('/rest/v1/posts?select=*&order=date.desc,id.desc'),g('/rest/v1/albums?select=*&order=position.asc'),g('/rest/v1/reports?select=*&order=date.desc'),g('/rest/v1/settings?select=*')]);
-S=assemble(P,Al,R,St);captureBase(S,P,Al,R,St);last=snapshot();loadErr=false;stat={s:'ok',m:'',c:false}}
-async function reloadAll(){if(!confirm('ستُتجاهل تعديلاتك غير المحفوظة ويُعاد تحميل أحدث بيانات الخادم. متابعة؟'))return;try{await loadAll();toast('تم تحميل أحدث البيانات');route()}catch(e){toast('تعذّر التحميل')}}
+S=assemble(P,Al,R,St);legacyMode=false;captureBase(S,P,Al,R,St);last=snapshot();loadErr=false;stat={s:'ok',m:'',c:false}}
+async function reloadAll(){if(!confirm('ستُتجاهل تعديلاتك غير المحفوظة ويُعاد تحميل أحدث بيانات الخادم. متابعة؟'))return;try{if(legacyMode)await loadLegacy();else await loadAll();toast('تم تحميل أحدث البيانات');route()}catch(e){toast('تعذّر التحميل')}}
 /* ---------- الحفظ: مزامنة لكل عنصر مع فحص الإصدار ---------- */
 const JH={'Content-Type':'application/json'};
 function errMsg(e,r){const t=r.title||r.key||('#'+r.id);if(e.status===409){stat.c=true;return `تعارض في «${t}»: عدّله مستخدم آخر. أعد تحميل البيانات.`}if(e.status===403||e.status===401||e.message==='not_found_or_denied')return `لا تملك صلاحية لهذا الإجراء («${t}»)`;return `تعذّر حفظ «${t}»: ${String(e.message).slice(0,80)}`}
-function save(){if(!tok||!me){toast('سجّل الدخول أولًا');return}if(!(can('content_create')||can('content_edit')||can('content_delete')||can('content_publish'))){toast('حسابك للمشاهدة فقط');return}if(loadErr){toast('تعذّر تحميل البيانات؛ الحفظ معطّل. أعد تحميل الصفحة.');return}if(busy)return;push()}
+function save(){if(legacyMode){toast('وضع الاستعادة للعرض فقط: لا يمكن الحفظ حتى ترحيل البيانات إلى الجداول الجديدة');return}if(!tok||!me){toast('سجّل الدخول أولًا');return}if(!(can('content_create')||can('content_edit')||can('content_delete')||can('content_publish'))){toast('حسابك للمشاهدة فقط');return}if(loadErr){toast('تعذّر تحميل البيانات؛ الحفظ معطّل. أعد تحميل الصفحة.');return}if(busy)return;push()}
 async function push(){busy=true;stat={s:'ok',m:'',c:false};const errs=[];let n=0;
 try{const rr=rowsOf(S);
 for(const [name,rows] of [['posts',rr.posts],['albums',rr.albums],['reports',rr.reports]]){const seen=new Set();
@@ -223,8 +236,8 @@ function eye(){const i=$('lg_p');i.type=i.type==='password'?'text':'password';$(
 async function logout(){try{await sb('/auth/v1/logout?scope=local',{m:'POST'})}catch(e){}dropSession();try{await loadAll()}catch(e){}go('#/')}
 async function boot(){$('app').innerHTML='<p style="padding:40px;text-align:center">جارٍ التحميل…</p>';try{tok=JSON.parse(localStorage.getItem('ns-sess'))}catch(e){tok=null}
 if(tok&&tok.at&&tok.rt){try{await ensure();me=await loadMe();if(me&&me.active)auth=true;else dropSession()}catch(e){dropSession()}}else tok=null;
-try{await loadAll()}catch(e){loadErr=true;S=seed();last=snapshot()}
-splLogos();route()}
+try{await loadAll()}catch(e){try{await loadLegacy()}catch(le){loadErr=true;S=seed();last=snapshot();console.error('فشل تحميل الموقع',e,le)}}
+splLogos();route();if(legacyMode){const banner=document.createElement('div');banner.textContent='وضع الاستعادة: البيانات القديمة معروضة من Supabase، والحفظ من لوحة التحكم متوقف مؤقتًا لحماية بياناتك.';banner.setAttribute('role','status');banner.style.cssText='position:fixed;bottom:0;right:0;left:0;z-index:200;background:#fff3ce;color:#493500;padding:8px 14px;text-align:center;font:14px Tahoma,Arial,sans-serif;border-top:2px solid #cc9b10';document.body.appendChild(banner)}}
 
 let toastT;function toast(m){const t=document.getElementById('tt');t.innerHTML=`<div class="toast" role="status">${esc(m)}</div>`;clearTimeout(toastT);toastT=setTimeout(()=>t.innerHTML='',3500)}
 const pub=()=>S.posts.filter(p=>p.status==='pub').sort((a,b)=>b.date.localeCompare(a.date));
