@@ -766,6 +766,54 @@ return h.replace('<div class="panel" style="margin-top:14px">',`<div class="pane
 </script>
 
 <script>
+/* تحسين إدارة الاستبيانات وظهورها وقراءة النتائج */
+(()=>{
+const jq=async(p,o)=>(await sb(p,o)).json(),J={'Content-Type':'application/json'},all=s=>s.structure.sections.flatMap(x=>x.questions),
+filled=a=>a!=null&&a!==''&&(!Array.isArray(a)||a.length>0)&&(typeof a!=='object'||Object.keys(a).length>0),
+AG=['لا أوافق بشدة','لا أوافق','محايد','أوافق','أوافق بشدة'];
+const css=document.createElement('style');css.textContent=`
+.sv-summary{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:12px;margin:18px 0}.sv-summary>div{padding:18px;border:1px solid var(--line);border-radius:12px;background:var(--card)}.sv-summary strong{display:block;font-size:28px;color:var(--teal)}
+.sv-chart{margin:14px 0}.sv-chart-head{display:flex;justify-content:space-between;gap:12px;margin-bottom:6px}.sv-track{height:14px;background:var(--teal2);border-radius:20px;overflow:hidden}.sv-fill{height:100%;background:var(--brand);border-radius:20px}.sv-answer{border:1px solid var(--line);border-radius:8px;padding:10px;margin:8px 0;white-space:pre-wrap;overflow-wrap:anywhere}.sv-analysis details{margin:12px 0}.sv-analysis summary{cursor:pointer;color:var(--teal);font-weight:500;padding:8px 0}.sv-home{padding:20px;border:1px solid var(--line);border-radius:12px;background:var(--teal2);margin-bottom:24px}.sv-home h2{color:var(--teal)}
+@media print{.sv-analysis details:not([open]){display:none}.sv-analysis .panel{break-inside:avoid}.sv-filter{display:none}}`;
+document.head.appendChild(css);
+SV.publish=async id=>{if(!can('content_edit'))return;try{const r=await jq('/rest/v1/surveys?id=eq.'+id,{m:'PATCH',h:{...J,Prefer:'return=representation'},b:JSON.stringify({status:'published'})});if(!r.length)throw Error('permission');SV.list=null;toast('تم النشر. يظهر للزوار؛ استقبال الردود يتبع المواعيد والإعدادات.');route()}catch(e){toast('تعذّر النشر. تحقق من الصلاحيات والاتصال.')}};
+SV.link=id=>{const u=new URL(location.href);u.hash='/survey/'+id;prompt('رابط الاستبيان للزوار — انسخه وشاركه:',u.href)};
+SV.del=async id=>{if(!can('content_delete'))return toast('ليس لديك صلاحية حذف المحتوى.');const s=(SV.list||[]).find(x=>x.id===id);if(!s)return;
+if(!confirm('حذف الاستبيان «'+s.title+'» نهائيًا مع جميع الردود التابعة له؟ لا يمكن التراجع.'))return;
+try{await sb('/rest/v1/rpc/delete_survey',{m:'POST',h:J,b:JSON.stringify({p_survey:id})});SV.list=null;SV.cur=null;SV.R=null;toast('تم حذف الاستبيان وردوده');route()}catch(e){toast(String(e.message).includes('delete_survey')?'شغّل ملف تفعيل حذف الاستبيانات في Supabase أولًا.':'تعذّر الحذف. تحقق من صلاحية الحذف والاتصال.')}};
+const adm0=SV.adm;SV.adm=()=>{let h=adm0();if(SV.cur||SV.list===null||!can('content_edit'))return h;
+h=h.replace('<h1>الاستبيانات</h1>','<h1>الاستبيانات</h1><p class="notice">القوالب الجديدة مسودات. اضغط «نشر للزوار» بعد الحفظ. الاستبيان المنشور يظهر في الصفحة الرئيسية وصفحة الاستبيانات؛ المواعيد وخيار استقبال الردود يحددان إمكانية تعبئته.</p>');
+for(const s of SV.list){const start='<button class="btn s o" onclick="SV.open('+s.id+')">';
+const actions=(s.status==='draft'?'<button class="btn s" onclick="SV.publish('+s.id+')">نشر للزوار</button> ':'')+(s.status==='published'?'<span class="badge">منشور للزوار</span> <button class="btn s o" onclick="SV.link('+s.id+')">نسخ الرابط</button> ':'')+(can('content_delete')?'<button class="btn s d" onclick="SV.del('+s.id+')">حذف</button> ':'');h=h.replace(start,actions+start)}return h};
+const pub0=pubPage;pubPage=h=>{let html=pub0(h);html=html.replace(/<a href="#\/surveys" class="[^"]*">الاستبيانات<\/a>/,'');html=html.replace('<nav class="main">','<nav class="main"><a href="#/surveys" class="'+(/^#\/survey/.test(h)?'on':'')+'">الاستبيانات</a>');
+if(h==='#/'||h==='#'||!h){html=html.replace('<main class="wrap">','<main class="wrap"><section class="sv-home"><h2>شاركنا رأيك</h2><p>استبيانات النشاط الطلابي ومقترحات التطوير.</p><div id="sv-home-list" aria-live="polite">جارٍ تحميل الاستبيانات…</div><div class="acts"><a class="btn o" href="#/surveys">عرض جميع الاستبيانات</a></div></section>');setTimeout(SV.home,0)}return html};
+SV.home=async()=>{const target=$('sv-home-list');if(!target)return;try{const rows=await jq('/rest/v1/surveys?status=eq.published&select=id,title,descr,accepting,opens_at,closes_at&order=id.desc&limit=6');if($('sv-home-list')!==target)return;
+target.innerHTML=rows.length?'<div class="grid">'+rows.map(s=>{const now=Date.now(),state=!s.accepting?'مغلق':s.opens_at&&now<+new Date(s.opens_at)?'لم يبدأ':s.closes_at&&now>=+new Date(s.closes_at)?'مغلق':'متاح للمشاركة';return '<a class="card" href="#/survey/'+Number(s.id)+'"><div class="cb"><span class="tag">'+state+'</span><h3>'+esc(s.title)+'</h3><p>'+esc((s.descr||'').slice(0,120))+'</p></div></a>'}).join('')+'</div>':'<p class="mut">لا توجد استبيانات منشورة حاليًا.</p>'}catch(e){if($('sv-home-list')===target)target.innerHTML='<p>تعذّر تحميل الاستبيانات. حاول تحديث الصفحة.</p>'}};
+const pct=(n,d)=>d?Math.round(n*1000/d)/10:0;
+const bars=(items,total)=>items.map(([label,count])=>'<div class="sv-chart"><div class="sv-chart-head"><span>'+esc(label)+'</span><b>'+count+' إجابة · '+pct(count,total)+'%</b></div><div class="sv-track"><div class="sv-fill" style="width:'+Math.min(100,pct(count,total))+'%"></div></div></div>').join('');
+const avg=a=>a.length?(a.reduce((x,y)=>x+y,0)/a.length).toFixed(2):'—';
+const scale=(values,lo,hi,labels)=>{const a=values.filter(v=>Number.isFinite(v)&&v>=lo&&v<=hi),items=[];for(let n=lo;n<=hi;n++)items.push([labels?labels[n-lo]:String(n),a.filter(v=>v===n).length]);return '<p><b>المتوسط: '+avg(a)+'</b> على مقياس '+lo+'–'+hi+' <span class="mut">· '+a.length+' إجابة</span></p>'+bars(items,a.length)};
+SV.ah=()=>{const R=SV.gr(),questions=all(SV.cur),days={};R.forEach(r=>{const d=new Date(+new Date(r.created_at)+3*3600000).toISOString().slice(0,10);days[d]=(days[d]||0)+1});
+let h='<div class="sv-analysis"><h2>'+esc(SV.cur.title)+'</h2><p class="mut">ملخص النتائج حسب الفترة المختارة. النسب محسوبة من المجيبين عن كل سؤال.</p><div class="sv-filter frow"><div><label>من تاريخ</label><input type="date" value="'+SV.fl.f+'" onchange="SV.fl.f=this.value;route()"></div><div><label>إلى تاريخ</label><input type="date" value="'+SV.fl.t+'" onchange="SV.fl.t=this.value;route()"></div></div><div class="acts"><button class="btn o" onclick="SV.fl={f:\'\',t:\'\'};route()">كل الفترات</button><button class="btn" onclick="print()">طباعة / حفظ PDF</button><button class="btn o" onclick="SV.csv()">تصدير الردود</button></div>';
+h+='<div class="sv-summary"><div><strong>'+R.length+'</strong>رد ضمن الفترة</div><div><strong>'+questions.length+'</strong>سؤال</div><div><strong>'+Object.keys(days).length+'</strong>يوم شهد مشاركة</div></div>';
+if((SV.R||[]).length>=5000)h+='<p class="notice">يعرض هذا الملخص آخر 5000 رد محمّل فقط، وقد توجد ردود أقدم خارج النتائج.</p>';
+if(!R.length)return h+'<div class="panel">لا توجد ردود في هذه الفترة. شارك رابط الاستبيان أو غيّر الفترة المختارة.</div></div>';
+h+='<details class="panel"><summary>المشاركات حسب اليوم — توقيت الرياض</summary>'+bars(Object.entries(days).sort(),R.length)+'</details>';
+questions.forEach((q,i)=>{const A=R.map(r=>(r.answers||{})[q.id]).filter(filled);let body='';
+if(!A.length)body='<p class="mut">لم تصل إجابات لهذا السؤال ضمن الفترة المحددة.</p>';
+else if(['single','select','yesno','multi'].includes(q.type)){const opts=q.type==='yesno'?[{id:'yes',t:'نعم'},{id:'no',t:'لا'}]:(q.opts||[]),valid=A.filter(a=>q.type==='multi'?Array.isArray(a):typeof a==='string');const items=opts.map(o=>[o.t,valid.filter(a=>q.type==='multi'?a.includes(o.id):a===o.id).length]);if(q.other)items.push(['أخرى',valid.filter(a=>q.type==='multi'?a.includes('_other'):a==='_other').length]);body=bars(items,valid.length)+(q.type==='multi'?'<small class="mut">يمكن اختيار أكثر من إجابة؛ قد يتجاوز مجموع النسب 100%.</small>':'');}
+else if(q.type==='agree')body=scale(A,1,5,AG);
+else if(q.type==='rating')body=scale(A,Number(q.lo),Number(q.hi));
+else if(q.type==='matrix'){body='<p class="mut">الاتفاق = أوافق أو أوافق بشدة. افتح العبارة لعرض توزيع الإجابات.</p>'+(q.rows||[]).map(row=>{const values=A.map(a=>a[row.id]).filter(v=>Number.isFinite(v)&&v>=1&&v<=5),positive=values.filter(v=>v>=4).length;return '<details><summary>'+esc(row.t)+'</summary><p><b>'+(values.length?pct(positive,values.length)+'%':'—')+' اتفاق</b></p>'+scale(values,1,5,AG)+'</details><div class="sv-chart-head"><span class="mut">'+values.length+' إجابة · المتوسط '+avg(values)+'/5</span><b>'+(values.length?pct(positive,values.length)+'%':'—')+' اتفاق</b></div><div class="sv-track"><div class="sv-fill" style="width:'+pct(positive,values.length)+'%"></div></div>'}).join('');}
+else if(q.type==='number'){const values=A.filter(Number.isFinite);body=values.length?'<div class="sv-summary"><div><strong>'+avg(values)+'</strong>المتوسط</div><div><strong>'+Math.min(...values)+'</strong>أقل قيمة</div><div><strong>'+Math.max(...values)+'</strong>أعلى قيمة</div></div>':'<p>لا توجد إجابات رقمية صالحة.</p>';}
+else body='<details><summary>عرض الإجابات المكتوبة ('+A.length+')</summary><input type="text" placeholder="ابحث في الإجابات" aria-label="بحث في الإجابات" oninput="const v=this.value;this.nextElementSibling.querySelectorAll(\'.sv-answer\').forEach(x=>x.hidden=!x.textContent.includes(v))"><div>'+A.map(a=>'<div class="sv-answer">'+esc(typeof a==='object'?JSON.stringify(a):String(a))+'</div>').join('')+'</div></details>';
+h+='<section class="panel"><h3>'+(i+1)+'. '+esc(q.t)+'</h3><p class="mut">أجاب '+A.length+' من '+R.length+' مشاركًا'+(q.showIf?' · سؤال يظهر بشرط':'')+'</p>'+body+'</section>'});return h+'</div>'};
+// تضمين آخر دقيقة كاملة في مرشح تاريخ النهاية.
+SV.gr=()=>(SV.R||[]).filter(r=>(!SV.fl.f||+new Date(r.created_at)>=+new Date(SV.fl.f+'T00:00:00+03:00'))&&(!SV.fl.t||+new Date(r.created_at)<+new Date(SV.fl.t+'T00:00:00+03:00')+86400000));
+})();
+</script>
+
+<script>
 boot();
 </script>
 </body></html>
